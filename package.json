@@ -1,0 +1,23 @@
+{
+  "name": "learnaws",
+  "version": "1.0.0",
+  "description": "DynamoDB",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xj0707/learnAWS.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/xj0707/learnAWS/issues"
+  },
+  "homepage": "https://github.com/xj0707/learnAWS#readme",
+  "dependencies": {
+    "aws-sdk": "^2.585.0",
+    "lodash": "^4.17.15"
+  }
+}
