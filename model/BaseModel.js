@@ -1,11 +1,15 @@
 const AWS = require('aws-sdk')
+const _ = require('lodash')
 
 AWS.config.update({ region: 'ap-northeast-1' })
 
 const docClient = new AWS.DynamoDB.DocumentClient({ apiVersion: '2012-08-10' })
 
-
+/**
+ * DynamoDB数据库操作基础封装
+ */
 module.exports = class BaseModel {
+    // 构造函数
     constructor() {
         this.baseitem = {
             createAt: Date.now(),
@@ -28,7 +32,7 @@ module.exports = class BaseModel {
     getItem(conditions = {}) {
         let otps = this.bindProjectParms(conditions.project)
         let params = {
-            TableName: item.tableName || this.TableName,
+            TableName: conditions.tableName || this.TableName,
             ConsistentRead: true,
             Key: conditions.key,
             ...otps
@@ -41,12 +45,12 @@ module.exports = class BaseModel {
      * {userId:'11',userName:'test01'}
      */
     putItem(conditions = {}) {
-        let params = {
-            TableName: item.tableName || this.TableName,
-            Item: {
-                ...this.baseitem,
-                ...conditions
-            }
+        let params = { Item: {} }
+        params.TableName = conditions.tableName || this.TableName
+        delete conditions.tableName
+        params.Item = {
+            ...this.baseitem,
+            ...conditions
         }
         return this.db$('put', params)
     }
@@ -58,7 +62,7 @@ module.exports = class BaseModel {
     updateItem(conditions = {}) {
         let otps = this.bindSetParms(conditions.updateItem)
         let params = {
-            TableName: item.tableName || this.TableName,
+            TableName: conditions.tableName || this.TableName,
             Key: conditions.key,
             ...otps
         }
@@ -71,7 +75,7 @@ module.exports = class BaseModel {
      */
     deleteItem(conditions = {}) {
         let params = {
-            TableName: item.tableName || this.TableName,
+            TableName: conditions.tableName || this.TableName,
             Key: conditions.key
         }
         return this.db$('delete', params)
@@ -79,32 +83,50 @@ module.exports = class BaseModel {
     /**
      * 使用索引查询
      * @param {Object} conditions 
-     * {}
      */
     query(conditions = {}) {
-
-
-
-
-        let params = {
-            ...this.TableName,
-            ...conditions
-        }
-        return this.queryInc(params, null)
+        conditions.TableName = conditions.TableName || this.TableName
+        return this.queryInc(conditions, null)
     }
     // 查询结果超过1M的情况需要递归查询
     queryInc(params, result) {
+        let keyTemplate = '', lastKey = ''
         return this.db$('query', params).then((res) => {
             if (!result) {
                 result = res
             } else {
                 result.Items.push(...res.Items)
             }
-            if (res.LastEvaluatedKey) {
-                params.ExclusiveStartKey = res.LastEvaluatedKey
-                return this.queryInc(params, result)
+            // 有Limit
+            if (params.Limit) {
+                if (result.Items.length < params.Limit) {
+                    if (res.LastEvaluatedKey) {
+                        params.ExclusiveStartKey = res.LastEvaluatedKey
+                        keyTemplate = res.LastEvaluatedKey
+                        return this.queryInc(params, result)
+                    } else {
+                        delete result.LastEvaluatedKey
+                        return result
+                    }
+                } else {
+                    if (keyTemplate) {
+                        lastKey = _.pick(result.Items[params.Limit - 1], keyTemplate)
+                    } else {
+                        lastKey = res.LastEvaluatedKey
+                    }
+                    let retrunRes = { Items: _.slice(result.Items, 0, params.Limit), Count: params.Limit }
+                    if (lastKey) {
+                        retrunRes.LastEvaluatedKey = lastKey
+                    }
+                    return retrunRes
+                }
             } else {
-                return result
+                if (res.LastEvaluatedKey) {
+                    params.ExclusiveStartKey = res.LastEvaluatedKey
+                    return this.queryInc(params, result)
+                } else {
+                    return result
+                }
             }
         }).catch((err) => {
             console.error(err)
@@ -113,25 +135,48 @@ module.exports = class BaseModel {
     }
     // 全表扫描查询
     scan(conditions = {}) {
-        let params = {
-            ...this.TableName,
-            ...conditions
-        }
-        return this.scanInc(params, null)
+        conditions.TableName = conditions.TableName || this.TableName
+        return this.scanInc(conditions, null)
     }
     // 当扫描数据超过1M的时候递归查询
     scanInc(params, result) {
+        let keyTemplate = '', lastKey = ''
         return this.db$('scan', params).then((res) => {
             if (!result) {
                 result = res
             } else {
                 result.Items.push(...res.Items)
             }
-            if (res.LastEvaluatedKey) {
-                params.ExclusiveStartKey = res.LastEvaluatedKey
-                return this.queryInc(params, result)
+            // 有Limit
+            if (params.Limit) {
+                if (result.Items.length < params.Limit) {
+                    if (res.LastEvaluatedKey) {
+                        params.ExclusiveStartKey = res.LastEvaluatedKey
+                        keyTemplate = res.LastEvaluatedKey
+                        return this.scanInc(params, result)
+                    } else {
+                        delete result.LastEvaluatedKey
+                        return result
+                    }
+                } else {
+                    if (keyTemplate) {
+                        lastKey = _.pick(result.Items[params.Limit - 1], keyTemplate)
+                    } else {
+                        lastKey = res.LastEvaluatedKey
+                    }
+                    let retrunRes = { Items: _.slice(result.Items, 0, params.Limit), Count: params.Limit }
+                    if (lastKey) {
+                        retrunRes.LastEvaluatedKey = lastKey
+                    }
+                    return retrunRes
+                }
             } else {
-                return result
+                if (res.LastEvaluatedKey) {
+                    params.ExclusiveStartKey = res.LastEvaluatedKey
+                    return this.scanInc(params, result)
+                } else {
+                    return result
+                }
             }
         }).catch((err) => {
             console.error(err)
@@ -279,7 +324,7 @@ module.exports = class BaseModel {
     /**
      *  构造更新参数
      * @param {Object} conditions 
-     * 
+     * {'k1':'v1','k2':'v2'}
      */
     bindSetParms(conditions = {}) {
         let keys = Object.keys(conditions), opts = {}
@@ -298,8 +343,8 @@ module.exports = class BaseModel {
     }
     /**
      * 构造查询字段参数
-     * @param {*} conditions
-     *  
+     * @param {Array} conditions
+     * ['p1','p2']
      */
     bindProjectParms(conditions = []) {
         let opts = {}
@@ -314,9 +359,4 @@ module.exports = class BaseModel {
         }
         return opts
     }
-    // 构造索引或扫描查询参数
-    bindQueryParms() {
-
-    }
-
 }
